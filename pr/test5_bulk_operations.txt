@@ -1,0 +1,12 @@
+credit 100
+balance 0
+balance 1
+balance 2
+debit 30
+balance 0
+balance 1
+balance 2
+credit 10
+balance 0
+balance 1
+balance 2

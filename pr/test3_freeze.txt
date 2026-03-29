@@ -1,0 +1,13 @@
+balance 0
+freeze 0
+transfer 0 1 10
+unfreeze 0
+transfer 0 1 10
+balance 0
+freeze 1
+debit 5
+balance 1
+unfreeze 1
+debit 5
+balance 1
+

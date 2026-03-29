@@ -1,0 +1,95 @@
+______test1_basic.txt_______
+Balance: 0
+Success: Credited 100 to all non-frozen accounts
+Balance: 100
+Success: Transferred 50 from account 0 to account 1
+Balance: 50
+Balance: 150
+Success: Debited 20 from all non-frozen accounts
+Balance: 30
+Balance: 150
+
+
+_____test2_errors.txt________
+Error: Invalid account number
+Error: Amount must be positive
+Account 0 frozen
+Error: Source account is frozen
+Success: Max balance for account 0 set to 100
+Error: Credit operation would exceed max balance on account 0
+Balance: 30
+Success: Min balance for account 0 set to 50
+Error: Debit operation would violate min balance on account 0
+Balance: 30
+
+
+___test3_freeze.txt_______
+Balance: 30
+Account 0 frozen
+Error: Source account is frozen
+Account 0 unfrozen
+Success: Transferred 10 from account 0 to account 1
+Balance: 20
+Account 1 frozen
+Success: Debited 5 from all non-frozen accounts
+Balance: 1
+Account 1 unfrozen
+Success: Debited 5 from all non-frozen accounts
+Balance: 1
+
+
+____test4_limits.txt
+Min balance: 0
+Max balance: 1000000
+Success: Min balance for account 0 set to 100
+Balance: 20
+Error: Credit operation would exceed max balance on account 0
+Success: Max balance for account 0 set to 200
+Success: Credited 150 to all non-frozen accounts
+Balance: 170
+Success: Min balance for account 1 set to 50
+Error: Debit operation would violate min balance on account 1
+Balance: 130
+
+___test5_bulk_operations.txt_____
+Success: Credited 100 to all non-frozen accounts
+Balance: 270
+Balance: 130
+Balance: 100
+Success: Debited 30 from all non-frozen accounts
+Balance: 240
+Balance: 100
+Balance: 70
+Success: Credited 10 to all non-frozen accounts
+Balance: 250
+Balance: 110
+Balance: 80
+
+
+___test6_mixed.txt_____
+Balance: 250
+Success: Credited 1000 to all non-frozen accounts
+Balance: 1250
+Success: Transfered 200 from account 0 to account 1
+Balance: 1050
+Balance: 310
+Success: Transferred 150 from account 1 to account 2
+Balance: 160
+Balance: 230
+Account 1 frozen
+Error: Source account is frozen
+Account 1 unfrozen
+Success: Transfered 50 from account 1 to account 3
+Balance: 110
+Balance: 50
+Success: Debited 100 from all non-frozen accounts
+Balance: 950
+Balance: 10
+Balance: 130
+Balance: -50
+
+
+
+
+
+

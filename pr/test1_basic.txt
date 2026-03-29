@@ -1,0 +1,9 @@
+balance 0
+credit 100
+balance 0
+transfer 0 1 50
+balance 0
+balance 1
+debit 20
+balance 0
+balance 1
