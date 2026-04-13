@@ -46,11 +46,13 @@ private:
 
 		if(bank->accounts[from].frozen) {
 			std::cout << "Error: source account is frozen" << std::endl;
+			unlock();
 			return false;
 		}
 
 		if(bank->accounts[to].frozen) {
 			std::cout << "Error: destination account is frozen" << std::endl;
+			unlock();
 			return false;	
 		}
 
