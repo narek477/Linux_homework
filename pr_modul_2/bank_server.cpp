@@ -5,31 +5,24 @@
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
 #include <unistd.h>
 #include <semaphore.h>
 #include <pthread.h>
 #include <signal.h>
 #include <cstdlib>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 #include "bank_common.h"
 
-// Глобальные переменные для сервера
+// Глобальные переменные
 BankData* bank = nullptr;
 sem_t* sem = nullptr;
 int shm_fd;
 size_t shm_size;
 int server_socket = -1;
-volatile bool running = true;
+volatile bool running = true;  // volatile для сигналов
 
-// Статистика запросов
-int request_count = 0;
-pthread_mutex_t stats_mutex = PTHREAD_MUTEX_INITIALIZER;
-pthread_cond_t stats_cond = PTHREAD_COND_INITIALIZER;
-bool shutdown_server = false;
-
-// Функции для работы с банком (те же, что и в клиенте)
+// Функции для работы с банком
 bool validate_account(int account) {
     return account >= 0 && account < bank->num_accounts;
 }
@@ -106,24 +99,24 @@ std::string transfer(int from, int to, int amount) {
         return "Error: Destination account is frozen";
     }
     
-    int new_from_balance = bank->accounts[from].balance - amount;
-    if (new_from_balance < bank->accounts[from].min_balance) {
+    int new_from = bank->accounts[from].balance - amount;
+    if (new_from < bank->accounts[from].min_balance) {
         unlock();
-        return "Error: Insufficient funds (would violate min balance)";
+        return "Error: Insufficient funds";
     }
     
-    int new_to_balance = bank->accounts[to].balance + amount;
-    if (new_to_balance > bank->accounts[to].max_balance) {
+    int new_to = bank->accounts[to].balance + amount;
+    if (new_to > bank->accounts[to].max_balance) {
         unlock();
-        return "Error: Transfer would exceed destination max balance";
+        return "Error: Would exceed max balance";
     }
     
-    bank->accounts[from].balance = new_from_balance;
-    bank->accounts[to].balance = new_to_balance;
+    bank->accounts[from].balance = new_from;
+    bank->accounts[to].balance = new_to;
     unlock();
     
     return "Success: Transferred " + std::to_string(amount) + 
-           " from account " + std::to_string(from) + " to account " + std::to_string(to);
+           " from account " + std::to_string(from) + " to " + std::to_string(to);
 }
 
 std::string credit_all(int amount) {
@@ -132,15 +125,6 @@ std::string credit_all(int amount) {
     }
     
     lock();
-    
-    for (int i = 0; i < bank->num_accounts; i++) {
-        if (bank->accounts[i].frozen) continue;
-        if (bank->accounts[i].balance + amount > bank->accounts[i].max_balance) {
-            unlock();
-            return "Error: Credit operation would exceed max balance on account " + std::to_string(i);
-        }
-    }
-    
     for (int i = 0; i < bank->num_accounts; i++) {
         if (!bank->accounts[i].frozen) {
             bank->accounts[i].balance += amount;
@@ -157,15 +141,6 @@ std::string debit_all(int amount) {
     }
     
     lock();
-    
-    for (int i = 0; i < bank->num_accounts; i++) {
-        if (bank->accounts[i].frozen) continue;
-        if (bank->accounts[i].balance - amount < bank->accounts[i].min_balance) {
-            unlock();
-            return "Error: Debit operation would violate min balance on account " + std::to_string(i);
-        }
-    }
-    
     for (int i = 0; i < bank->num_accounts; i++) {
         if (!bank->accounts[i].frozen) {
             bank->accounts[i].balance -= amount;
@@ -182,10 +157,6 @@ std::string set_min_balance(int account, int value) {
     }
     
     lock();
-    if (value > bank->accounts[account].balance) {
-        unlock();
-        return "Error: Min balance cannot exceed current balance";
-    }
     bank->accounts[account].min_balance = value;
     unlock();
     
@@ -199,10 +170,6 @@ std::string set_max_balance(int account, int value) {
     }
     
     lock();
-    if (value < bank->accounts[account].balance) {
-        unlock();
-        return "Error: Max balance cannot be less than current balance";
-    }
     bank->accounts[account].max_balance = value;
     unlock();
     
@@ -210,7 +177,6 @@ std::string set_max_balance(int account, int value) {
            " set to " + std::to_string(value);
 }
 
-// Обработка команды от клиента
 std::string process_command(const std::string& cmd) {
     std::vector<std::string> tokens = split(cmd, ' ');
     if (tokens.empty()) {
@@ -252,38 +218,24 @@ std::string process_command(const std::string& cmd) {
             return "SHUTDOWN";
         }
         else {
-            return "Error: Unknown command or incorrect syntax";
+            return "Error: Unknown command";
         }
     } catch (const std::exception& e) {
         return "Error: Invalid number format";
     }
 }
 
-// Функция для вывода статистики (запускается в отдельной нити)
-void* stats_printer(void* arg) {
-    pthread_mutex_lock(&stats_mutex);
-    while (!shutdown_server) {
-        pthread_cond_wait(&stats_cond, &stats_mutex);
-        if (shutdown_server) break;
-        std::cout << "[STATS] Total requests processed: " << request_count << std::endl;
-    }
-    pthread_mutex_unlock(&stats_mutex);
-    return nullptr;
-}
-
-// Функция для обработки клиента (в отдельной нити)
 void* handle_client(void* arg) {
     int client_fd = *(int*)arg;
     delete (int*)arg;
     
-    char buffer[BUFFER_SIZE];
-    std::string response;
+    char buffer[4096];
     
-    while (running && !shutdown_server) {
-        memset(buffer, 0, BUFFER_SIZE);
-        int bytes_read = recv(client_fd, buffer, BUFFER_SIZE - 1, 0);
+    while (running) {
+        memset(buffer, 0, sizeof(buffer));
+        int bytes = recv(client_fd, buffer, sizeof(buffer) - 1, 0);
         
-        if (bytes_read <= 0) {
+        if (bytes <= 0) {
             break;
         }
         
@@ -292,23 +244,13 @@ void* handle_client(void* arg) {
         
         if (command.empty()) continue;
         
-        // Обрабатываем команду
-        response = process_command(command);
+        std::string response = process_command(command);
         
-        // Обновляем статистику
-        pthread_mutex_lock(&stats_mutex);
-        request_count++;
-        if (request_count % 5 == 0) {
-            pthread_cond_signal(&stats_cond);
-        }
-        pthread_mutex_unlock(&stats_mutex);
-        
-        // Проверяем shutdown
+        // Если команда shutdown
         if (response == "SHUTDOWN") {
-            response = "Server is shutting down...";
+            response = "Server shutting down...\n";
             send(client_fd, response.c_str(), response.length(), 0);
-            shutdown_server = true;
-            running = false;
+            running = false;  // Останавливаем сервер
             close(client_fd);
             break;
         }
@@ -321,71 +263,47 @@ void* handle_client(void* arg) {
     return nullptr;
 }
 
-// Инициализация разделяемой памяти
 bool init_shared_memory() {
     shm_fd = shm_open(SHM_NAME, O_RDWR, 0666);
     if (shm_fd == -1) {
-        std::cerr << "Failed to open shared memory. Run bank_init first." << std::endl;
+        std::cerr << "Failed to open shared memory. Run ./bank_init 10 first" << std::endl;
         return false;
     }
     
-    struct stat shm_stat;
-    if (fstat(shm_fd, &shm_stat) == -1) {
-        std::cerr << "Failed to get shared memory size" << std::endl;
+    struct stat st;
+    if (fstat(shm_fd, &st) == -1) {
         return false;
     }
-    shm_size = shm_stat.st_size;
+    shm_size = st.st_size;
     
-    bank = static_cast<BankData*>(mmap(0, shm_size, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0));
+    bank = (BankData*)mmap(0, shm_size, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
     if (bank == MAP_FAILED) {
-        std::cerr << "Failed to map shared memory" << std::endl;
         return false;
     }
     
     sem = sem_open(SEM_NAME, 0);
     if (sem == SEM_FAILED) {
-        std::cerr << "Failed to open semaphore" << std::endl;
-        munmap(bank, shm_size);
         return false;
     }
     
     return true;
 }
 
-void cleanup() {
-    if (bank && bank != MAP_FAILED) {
-        munmap(bank, shm_size);
-    }
-    if (shm_fd != -1) {
-        close(shm_fd);
-    }
-    if (sem != SEM_FAILED) {
-        sem_close(sem);
-    }
-    if (server_socket != -1) {
-        close(server_socket);
-    }
-    pthread_mutex_destroy(&stats_mutex);
-    pthread_cond_destroy(&stats_cond);
-}
-
 void signal_handler(int sig) {
     std::cout << "\nReceived signal " << sig << ", shutting down..." << std::endl;
     running = false;
-    shutdown_server = true;
-    pthread_cond_signal(&stats_cond);
+    if (server_socket != -1) {
+        close(server_socket);  // Это заставит accept() прерваться
+    }
 }
 
 int main(int argc, char* argv[]) {
-    int port = DEFAULT_PORT;
+    int port = 8888;
     if (argc > 1) {
         port = std::atoi(argv[1]);
-        if (port <= 0 || port > 65535) {
-            std::cerr << "Invalid port number" << std::endl;
-            return 1;
-        }
     }
     
+    // Обработка сигналов
     signal(SIGINT, signal_handler);
     signal(SIGTERM, signal_handler);
     
@@ -395,78 +313,70 @@ int main(int argc, char* argv[]) {
     
     std::cout << "Bank server starting on port " << port << std::endl;
     std::cout << "Bank has " << bank->num_accounts << " accounts" << std::endl;
-    
-    // Создаем нить для вывода статистики
-    pthread_t stats_thread;
-    if (pthread_create(&stats_thread, nullptr, stats_printer, nullptr) != 0) {
-        std::cerr << "Failed to create stats thread" << std::endl;
-        cleanup();
-        return 1;
-    }
+    std::cout << "Type Ctrl+C or use 'shutdown' command to stop" << std::endl;
     
     // Создаем сокет
     server_socket = socket(AF_INET, SOCK_STREAM, 0);
     if (server_socket == -1) {
         std::cerr << "Failed to create socket" << std::endl;
-        cleanup();
         return 1;
     }
     
     int opt = 1;
     setsockopt(server_socket, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
     
-    struct sockaddr_in server_addr;
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_addr.s_addr = INADDR_ANY;
-    server_addr.sin_port = htons(port);
+    struct sockaddr_in addr;
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = INADDR_ANY;
+    addr.sin_port = htons(port);
     
-    if (bind(server_socket, (struct sockaddr*)&server_addr, sizeof(server_addr)) == -1) {
-        std::cerr << "Failed to bind socket" << std::endl;
-        cleanup();
+    if (bind(server_socket, (struct sockaddr*)&addr, sizeof(addr)) == -1) {
+        std::cerr << "Failed to bind to port " << port << std::endl;
+        close(server_socket);
         return 1;
     }
     
     if (listen(server_socket, 10) == -1) {
-        std::cerr << "Failed to listen on socket" << std::endl;
-        cleanup();
+        std::cerr << "Failed to listen" << std::endl;
+        close(server_socket);
         return 1;
     }
     
-    std::cout << "Server listening for connections..." << std::endl;
+    std::cout << "Server is ready. Waiting for connections..." << std::endl;
     
-    // Основной цикл принятия клиентов
-    while (running && !shutdown_server) {
+    while (running) {
         struct sockaddr_in client_addr;
         socklen_t client_len = sizeof(client_addr);
         
         int client_fd = accept(server_socket, (struct sockaddr*)&client_addr, &client_len);
         if (client_fd == -1) {
             if (running) {
-                std::cerr << "Failed to accept connection" << std::endl;
+                // Если accept прерван не из-за shutdown
+                if (errno != EINTR) {
+                    std::cerr << "Accept failed: " << strerror(errno) << std::endl;
+                }
             }
             continue;
         }
         
-        char client_ip[INET_ADDRSTRLEN];
-        inet_ntop(AF_INET, &client_addr.sin_addr, client_ip, INET_ADDRSTRLEN);
-        std::cout << "Client connected from " << client_ip << ":" << ntohs(client_addr.sin_port) << std::endl;
+        char ip[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &client_addr.sin_addr, ip, INET_ADDRSTRLEN);
+        std::cout << "Client connected from " << ip << std::endl;
         
-        int* client_fd_ptr = new int(client_fd);
-        pthread_t client_thread;
-        if (pthread_create(&client_thread, nullptr, handle_client, client_fd_ptr) != 0) {
-            std::cerr << "Failed to create client thread" << std::endl;
-            delete client_fd_ptr;
-            close(client_fd);
-        } else {
-            pthread_detach(client_thread);
-        }
+        int* ptr = new int(client_fd);
+        pthread_t thread;
+        pthread_create(&thread, nullptr, handle_client, ptr);
+        pthread_detach(thread);
     }
     
-    std::cout << "Waiting for all clients to disconnect..." << std::endl;
-    sleep(1);
+    std::cout << "Waiting for clients to disconnect..." << std::endl;
+    sleep(1);  // Даем время клиентским потокам завершиться
     
-    cleanup();
+    close(server_socket);
+    munmap(bank, shm_size);
+    close(shm_fd);
+    sem_close(sem);
+    
     std::cout << "Server shutdown complete" << std::endl;
-    
     return 0;
 }
