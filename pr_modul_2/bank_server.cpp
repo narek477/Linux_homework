@@ -250,7 +250,7 @@ void* handle_client(void* arg) {
         if (response == "SHUTDOWN") {
             response = "Server shutting down...\n";
             send(client_fd, response.c_str(), response.length(), 0);
-            running = false;  // Останавливаем сервер
+            running = false; 
             close(client_fd);
             break;
         }
