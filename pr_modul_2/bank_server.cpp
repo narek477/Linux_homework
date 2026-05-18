@@ -14,15 +14,15 @@
 #include <arpa/inet.h>
 #include "bank_common.h"
 
-// Глобальные переменные
+
 BankData* bank = nullptr;
 sem_t* sem = nullptr;
 int shm_fd;
 size_t shm_size;
 int server_socket = -1;
-volatile bool running = true;  // volatile для сигналов
+volatile bool running = true;
 
-// Функции для работы с банком
+
 bool validate_account(int account) {
     return account >= 0 && account < bank->num_accounts;
 }
@@ -246,7 +246,7 @@ void* handle_client(void* arg) {
         
         std::string response = process_command(command);
         
-        // Если команда shutdown
+        
         if (response == "SHUTDOWN") {
             response = "Server shutting down...\n";
             send(client_fd, response.c_str(), response.length(), 0);
@@ -293,7 +293,7 @@ void signal_handler(int sig) {
     std::cout << "\nReceived signal " << sig << ", shutting down..." << std::endl;
     running = false;
     if (server_socket != -1) {
-        close(server_socket);  // Это заставит accept() прерваться
+        close(server_socket);  //
     }
 }
 
@@ -303,7 +303,7 @@ int main(int argc, char* argv[]) {
         port = std::atoi(argv[1]);
     }
     
-    // Обработка сигналов
+    
     signal(SIGINT, signal_handler);
     signal(SIGTERM, signal_handler);
     
@@ -315,7 +315,7 @@ int main(int argc, char* argv[]) {
     std::cout << "Bank has " << bank->num_accounts << " accounts" << std::endl;
     std::cout << "Type Ctrl+C or use 'shutdown' command to stop" << std::endl;
     
-    // Создаем сокет
+    
     server_socket = socket(AF_INET, SOCK_STREAM, 0);
     if (server_socket == -1) {
         std::cerr << "Failed to create socket" << std::endl;
@@ -351,7 +351,7 @@ int main(int argc, char* argv[]) {
         int client_fd = accept(server_socket, (struct sockaddr*)&client_addr, &client_len);
         if (client_fd == -1) {
             if (running) {
-                // Если accept прерван не из-за shutdown
+                
                 if (errno != EINTR) {
                     std::cerr << "Accept failed: " << strerror(errno) << std::endl;
                 }
@@ -370,7 +370,7 @@ int main(int argc, char* argv[]) {
     }
     
     std::cout << "Waiting for clients to disconnect..." << std::endl;
-    sleep(1);  // Даем время клиентским потокам завершиться
+    sleep(1);
     
     close(server_socket);
     munmap(bank, shm_size);
