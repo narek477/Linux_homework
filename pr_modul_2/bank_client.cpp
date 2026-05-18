@@ -80,7 +80,7 @@ public:
         std::cout << "Type 'exit' to quit, 'shutdown' to stop the server" << std::endl;
         std::cout << std::endl;
         
-        // Настройка цветного вывода
+        
         std::vector<std::string> green_words = {"Success:", "Balance:"};
         std::vector<std::string> red_words = {"Error:"};
         Painter painter(std::cout, green_words, red_words);
